@@ -1,3 +1,309 @@
+-- ============================================================
+-- KEY SYSTEM START
+-- ============================================================
+local KEY_SYS = {
+    KEYS_URL      = "https://raw.githubusercontent.com/FebzTzy/febz-hub/main/keys.json",
+    CACHE_FILE    = "FebzHub/keycache.json",
+    LOCAL_FILE    = "FebzHub/keydata.json",
+    HWID_REQUIRED = true,
+    CACHE_TTL     = 300,
+    OFFLINE_GRACE = 86400,
+}
+
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local plr = Players.LocalPlayer
+
+local function ensure_folder(path)
+    pcall(function() if not isfolder(path) then makefolder(path) end end)
+end
+local function read_json(path)
+    local ok, data = pcall(function()
+        if isfile(path) then return HttpService:JSONDecode(readfile(path)) end
+        return nil
+    end)
+    return ok and data or nil
+end
+local function write_json(path, data)
+    pcall(function() writefile(path, HttpService:JSONEncode(data)) end)
+end
+local function rm_file(path)
+    pcall(function() if isfile(path) then delfile(path) end end)
+end
+
+local function get_hwid()
+    local ok, hwid = pcall(function()
+        if gethwid then return gethwid() end
+        if syn and syn.get_hwid then return syn.get_hwid() end
+        if get_hwid then return get_hwid() end
+        return nil
+    end)
+    return ok and hwid or nil
+end
+
+local function notify(title, desc, color)
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "FebzKeyNotify"
+    gui.ResetOnSpawn = false
+    gui.Parent = plr:WaitForChild("PlayerGui")
+    local frame = Instance.new("Frame", gui)
+    frame.Size = UDim2.new(0, 340, 0, 92)
+    frame.Position = UDim2.new(0.5, -170, 0, 30)
+    frame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    frame.BorderSizePixel = 0
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+    local stroke = Instance.new("UIStroke", frame)
+    stroke.Color = color or Color3.fromRGB(90, 90, 100)
+    stroke.Thickness = 1
+    local t = Instance.new("TextLabel", frame)
+    t.Size = UDim2.new(1, -20, 0, 26)
+    t.Position = UDim2.new(0, 10, 0, 8)
+    t.BackgroundTransparency = 1
+    t.Font = Enum.Font.GothamBold
+    t.TextSize = 14
+    t.TextColor3 = color or Color3.fromRGB(240, 240, 240)
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.Text = title
+    local d = Instance.new("TextLabel", frame)
+    d.Size = UDim2.new(1, -20, 0, 50)
+    d.Position = UDim2.new(0, 10, 0, 34)
+    d.BackgroundTransparency = 1
+    d.Font = Enum.Font.GothamMedium
+    d.TextSize = 12
+    d.TextColor3 = Color3.fromRGB(220, 220, 230)
+    d.TextWrapped = true
+    d.TextXAlignment = Enum.TextXAlignment.Left
+    d.TextYAlignment = Enum.TextYAlignment.Top
+    d.Text = desc
+    task.delay(7, function() if gui and gui.Parent then gui:Destroy() end end)
+end
+
+local function fetch_keys_remote()
+    local ok, body = pcall(function() return game:HttpGet(KEY_SYS.KEYS_URL, true) end)
+    if not ok or not body or body == "" then return nil, "fetch_failed" end
+    local decode_ok, data = pcall(function() return HttpService:JSONDecode(body) end)
+    if not decode_ok or type(data) ~= "table" then return nil, "decode_failed" end
+    ensure_folder("FebzHub")
+    write_json(KEY_SYS.CACHE_FILE, { fetched_at = os.time(), data = data })
+    return data, "ok"
+end
+
+local function load_cache()
+    local cache = read_json(KEY_SYS.CACHE_FILE)
+    if not cache or not cache.data or not cache.fetched_at then return nil end
+    if os.time() - cache.fetched_at > KEY_SYS.OFFLINE_GRACE then return nil end
+    return cache.data, os.time() - cache.fetched_at
+end
+
+local function get_keys_config()
+    local cache = read_json(KEY_SYS.CACHE_FILE)
+    local age = cache and cache.fetched_at and (os.time() - cache.fetched_at) or math.huge
+    if age >= KEY_SYS.CACHE_TTL then
+        local data, err = fetch_keys_remote()
+        if data then return data, "remote" end
+        local cached = load_cache()
+        if cached then return cached, "cache_stale" end
+        return nil, err or "no_cache"
+    end
+    return cache.data, "cache"
+end
+
+local function validate(key, hwid, config)
+    if not key or key == "" then return false, "empty" end
+    if not config or not config.keys then return false, "no_config" end
+    if config.maintenance == true then return false, "maintenance" end
+    if hwid and type(config.blacklist_hwid) == "table" then
+        for _, banned in ipairs(config.blacklist_hwid) do
+            if banned == hwid then return false, "hwid_banned" end
+        end
+    end
+    local entry = config.keys[key]
+    if not entry then return false, "invalid" end
+    local exp = tonumber(entry.expires) or 0
+    if exp > 0 and os.time() > exp then return false, "expired" end
+    if KEY_SYS.HWID_REQUIRED and hwid then
+        ensure_folder("FebzHub")
+        local bind_path = "FebzHub/keybind.json"
+        local bind = read_json(bind_path) or {}
+        if bind[key] and bind[key] ~= hwid then return false, "bound_elsewhere" end
+        if not bind[key] then bind[key] = hwid; write_json(bind_path, bind) end
+    end
+    return true, "ok"
+end
+
+local function prompt_key(reason)
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "FebzKeyPrompt"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.Parent = plr:WaitForChild("PlayerGui")
+
+    local bd = Instance.new("Frame", gui)
+    bd.Size = UDim2.new(1, 0, 1, 0)
+    bd.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    bd.BackgroundTransparency = 0.5
+    bd.BorderSizePixel = 0
+
+    local box = Instance.new("Frame", bd)
+    box.Size = UDim2.new(0, 380, 0, 220)
+    box.Position = UDim2.new(0.5, -190, 0.5, -110)
+    box.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    box.BorderSizePixel = 0
+    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 10)
+    local bs = Instance.new("UIStroke", box)
+    bs.Color = Color3.fromRGB(100, 100, 110)
+    bs.Thickness = 1.2
+
+    local title = Instance.new("TextLabel", box)
+    title.Size = UDim2.new(1, 0, 0, 30)
+    title.Position = UDim2.new(0, 0, 0, 12)
+    title.BackgroundTransparency = 1
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 16
+    title.TextColor3 = Color3.fromRGB(240, 240, 240)
+    title.Text = "Febz Hub — Key Required"
+
+    local sub = Instance.new("TextLabel", box)
+    sub.Size = UDim2.new(1, -40, 0, 34)
+    sub.Position = UDim2.new(0, 20, 0, 46)
+    sub.BackgroundTransparency = 1
+    sub.Font = Enum.Font.GothamMedium
+    sub.TextSize = 12
+    sub.TextColor3 = Color3.fromRGB(160, 160, 170)
+    sub.TextWrapped = true
+    sub.Text = reason or "Masukin key lu. Hubungi owner kalau belum punya."
+
+    local input = Instance.new("TextBox", box)
+    input.Size = UDim2.new(1, -40, 0, 38)
+    input.Position = UDim2.new(0, 20, 0, 92)
+    input.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    input.BorderSizePixel = 0
+    input.Font = Enum.Font.Code
+    input.TextSize = 13
+    input.TextColor3 = Color3.fromRGB(235, 235, 240)
+    input.PlaceholderText = "XXXX-XXXX-XXXX-XXXX"
+    input.PlaceholderColor3 = Color3.fromRGB(90, 90, 100)
+    input.Text = ""
+    input.ClearTextOnFocus = false
+    Instance.new("UICorner", input).CornerRadius = UDim.new(0, 6)
+
+    local status = Instance.new("TextLabel", box)
+    status.Size = UDim2.new(1, -40, 0, 40)
+    status.Position = UDim2.new(0, 20, 0, 134)
+    status.BackgroundTransparency = 1
+    status.Font = Enum.Font.GothamMedium
+    status.TextSize = 11
+    status.TextColor3 = Color3.fromRGB(255, 100, 100)
+    status.TextXAlignment = Enum.TextXAlignment.Left
+    status.TextYAlignment = Enum.TextYAlignment.Top
+    status.TextWrapped = true
+    status.Text = ""
+
+    local submit = Instance.new("TextButton", box)
+    submit.Size = UDim2.new(1, -40, 0, 32)
+    submit.Position = UDim2.new(0, 20, 0, 178)
+    submit.BackgroundColor3 = Color3.fromRGB(60, 40, 100)
+    submit.BorderSizePixel = 0
+    submit.Font = Enum.Font.GothamBold
+    submit.TextSize = 13
+    submit.TextColor3 = Color3.fromRGB(235, 235, 240)
+    submit.Text = "Verify"
+    Instance.new("UICorner", submit).CornerRadius = UDim.new(0, 6)
+
+    local done = false
+
+    local function try_verify(key)
+        status.TextColor3 = Color3.fromRGB(180, 180, 190)
+        status.Text = "memverifikasi..."
+        local config, source = get_keys_config()
+        if not config then
+            status.TextColor3 = Color3.fromRGB(255, 100, 100)
+            status.Text = "gagal fetch key config — coba lagi"
+            return
+        end
+        local ok, reason2 = validate(key, get_hwid(), config)
+        if ok then
+            ensure_folder("FebzHub")
+            write_json(KEY_SYS.LOCAL_FILE, { key = key, saved_at = os.time(), hwid = get_hwid(), source = source })
+            status.TextColor3 = Color3.fromRGB(120, 255, 120)
+            status.Text = "berhasil — loading..."
+            done = true
+            task.wait(0.4)
+            gui:Destroy()
+        else
+            local msg = ({
+                empty           = "key kosong",
+                invalid         = "key salah / nggak terdaftar",
+                expired         = "key udah expired",
+                bound_elsewhere = "key ini ke-lock ke device lain",
+                hwid_banned     = "device lu di-ban",
+                maintenance     = "hub lagi maintenance, coba nanti",
+                no_config       = "config key kosong / rusak",
+            })[reason2] or ("gagal: " .. tostring(reason2))
+            status.TextColor3 = Color3.fromRGB(255, 100, 100)
+            status.Text = msg
+        end
+    end
+
+    submit.MouseButton1Click:Connect(function()
+        local key = (input.Text or ""):gsub("%s+", ""):upper()
+        try_verify(key)
+    end)
+    input.FocusLost:Connect(function(enter)
+        if enter then
+            local key = (input.Text or ""):gsub("%s+", ""):upper()
+            try_verify(key)
+        end
+    end)
+
+    while not done do task.wait(0.1) end
+end
+
+local function check_and_gate()
+    local stored = read_json(KEY_SYS.LOCAL_FILE)
+    if stored and stored.key then
+        local config, source = get_keys_config()
+        if config then
+            local ok, reason = validate(stored.key, get_hwid(), config)
+            if ok then
+                if source == "cache_stale" then
+                    notify("Febz Hub", "Key valid (offline).", Color3.fromRGB(255, 200, 100))
+                else
+                    notify("Febz Hub", "Key valid — welcome.", Color3.fromRGB(120, 255, 120))
+                end
+                return true
+            end
+            rm_file(KEY_SYS.LOCAL_FILE)
+            if reason == "maintenance" then
+                notify("Maintenance", "Script lagi maintenance.", Color3.fromRGB(255, 200, 100))
+                return false
+            end
+        else
+            notify("Connection", "Gagal fetch config + nggak ada cache.", Color3.fromRGB(255, 100, 100))
+            return false
+        end
+    end
+    prompt_key()
+    local after = read_json(KEY_SYS.LOCAL_FILE)
+    if after and after.key then
+        local config = get_keys_config()
+        if config then
+            local ok = validate(after.key, get_hwid(), config)
+            if ok then return true end
+        end
+    end
+    return false
+end
+
+if not check_and_gate() then
+    return
+end
+-- ============================================================
+-- KEY SYSTEM END
+-- ============================================================
+
+-- Recovered Luau source by ZeroVector
+local v1 = loadstring(game:HttpGet("https://script.panduhub.com/PanduUiLibrary.lua"))()
 -- Recovered Luau source by ZeroVector
 local v1 = loadstring(game:HttpGet("https://script.panduhub.com/PanduUiLibrary.lua"))()
 local v2, v3, v4, v5, v6, v7, v9, v10, v11, v12, v13, v14, v374, v375, v376, v379, v380, v384, v482, v487
