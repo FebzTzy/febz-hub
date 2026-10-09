@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "maintenance": false,
+  "maintenance_msg": "",
+  "blacklist_hwid": [],
+  "keys": {
+    "FEBZ-OWNR-6609-5581": { "expires": 999999, "note": "owner" },
+    "FEBZ-TEST-7735-GHJB": { "expires": 5, "note": "tester" }
+  }
+}
