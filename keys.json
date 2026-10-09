@@ -1,10 +1,13 @@
 {
-  "version": 1,
+  "version": 2,
   "maintenance": false,
   "maintenance_msg": "",
   "blacklist_hwid": [],
   "keys": {
-    "FEBZ-OWNR-6609-5581": { "expires": 999999, "note": "owner" },
-    "FEBZ-TEST-7735-GHJB": { "expires": 5, "note": "tester" }
+    "FEBZ-OWNR-6609-5581": { "duration": 0,   "unit": "permanent", "note": "owner" },
+    "FEBZ-TEST-7735-GHJB": { "duration": 30,  "unit": "minute",    "note": "tester cepat" },
+    "FEBZ-FREE-1111-AAAA": { "duration": 2,   "unit": "hour",      "note": "gratis 2 jam" },
+    "FEBZ-DAYS-2222-BBBB": { "duration": 7,   "unit": "day",       "note": "seminggu" },
+    "FEBZ-ABSOL-3333-CCCC": { "expires": 1827000000, "note": "absolute timestamp" }
   }
 }
