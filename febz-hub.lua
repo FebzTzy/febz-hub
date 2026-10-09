@@ -304,8 +304,6 @@ end
 
 -- Recovered Luau source by ZeroVector
 local v1 = loadstring(game:HttpGet("https://script.panduhub.com/PanduUiLibrary.lua"))()
--- Recovered Luau source by ZeroVector
-local v1 = loadstring(game:HttpGet("https://script.panduhub.com/PanduUiLibrary.lua"))()
 local v2, v3, v4, v5, v6, v7, v9, v10, v11, v12, v13, v14, v374, v375, v376, v379, v380, v384, v482, v487
 local v539, v567, v568, v625, v765, v766, v771, v777, v791
 do
